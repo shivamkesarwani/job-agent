@@ -1,0 +1,72 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: job-agent
+
+  # MongoDB Configuration
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/jobagent
+      database: jobagent
+
+  # Spring AI - OpenAI (used for AI filtering)
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:your-openai-api-key-here}
+      chat:
+        options:
+          model: gpt-4o-mini
+          temperature: 0.2
+
+# Job Agent Configuration
+job-agent:
+  # Your profile — edit these to match your skills
+  candidate:
+    skills:
+      - Java
+      - Spring Boot
+      - Microservices
+      - REST API
+      - MongoDB
+      - Docker
+      - Kubernetes
+      - AWS
+    experience-years: 4.5
+    preferred-roles:
+      - Backend Developer
+      - Java Developer
+      - Software Engineer
+      - Software Development Engineer
+    preferred-locations:
+      - Remote
+      - Delhi
+      - Bangalore
+      - Hyderabad
+    min-salary: 2000000  # in INR per annum
+
+  # Scheduler: runs at 8 AM and 8 PM daily
+  scheduler:
+    cron-morning: "0 0 8 * * *"
+    cron-evening: "0 0 20 * * *"
+
+  # Job portals to scrape
+  portals:
+    linkedin:
+      enabled: true
+      base-url: https://www.linkedin.com/jobs/search
+    remotive:
+      enabled: false
+      base-url: https://remotive.com/api/remote-jobs
+    remoteok:
+      enabled: false
+      base-url: https://remoteok.com/api
+    arbeitnow:
+      enabled: false
+      base-url: https://www.arbeitnow.com/api/job-board-api
+
+logging:
+  level:
+    com.jobagent: DEBUG
+    org.springframework.ai: INFO
