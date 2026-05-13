@@ -13,10 +13,8 @@ An AI agent that scrapes job portals twice daily, scores each listing against yo
 │  JobScheduler (8 AM / 8 PM)                        │
 │       │                                             │
 │       ▼                                             │
-│  JobScraperService ──► Remotive API                │
-│       │             ──► RemoteOK API               │
-│       │             ──► Arbeitnow API              │
-│       │             ──► LinkedIn HTML              │
+│  JobScraperService ──► LinkedIn HTML                │
+│       │                                             │
 │       │                                             │
 │       ▼                                             │
 │  AIAgentService ──► Google Gemini 2.0 Flash Lite   │
@@ -130,7 +128,7 @@ src/main/resources/static/index.html
 **Features:**
 - View all scraped jobs sorted by AI relevance score
 - Search jobs by MongoDB ID
-- Filter by source portal (Remotive, RemoteOK, Arbeitnow, LinkedIn)
+- Filter by source portal (LinkedIn)
 - Filter by minimum relevance score (slider)
 - Full-text search by title, company, or skill
 - View full job details with AI summary and skill tags
@@ -163,16 +161,16 @@ db.jobs.find({ relevanceScore: { $gte: 8 } }).pretty() # high score jobs
 
 ## REST API
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/jobs` | All active jobs, sorted by AI relevance score |
+| Method | Endpoint                                | Description |
+|--------|-----------------------------------------|-------------|
+| GET | `/api/jobs`                             | All active jobs, sorted by AI relevance score |
 | GET | `/api/jobs?minScore=7.0&page=0&size=20` | Filter by minimum score |
-| GET | `/api/jobs/{id}` | Single job detail |
-| GET | `/api/jobs/search?q=spring+boot` | Full-text search |
-| GET | `/api/jobs/source/remotive` | Jobs from a specific portal |
-| GET | `/api/jobs/recent?hours=24` | Jobs scraped in last N hours |
-| GET | `/api/jobs/stats` | Count of jobs per portal |
-| POST | `/api/jobs/trigger` | Manually trigger a full agent run |
+| GET | `/api/jobs/{id}`                        | Single job detail |
+| GET | `/api/jobs/search?q=spring+boot`        | Full-text search |
+| GET | `/api/jobs/source/linkedin`             | Jobs from a specific portal |
+| GET | `/api/jobs/recent?hours=24`             | Jobs scraped in last N hours |
+| GET | `/api/jobs/stats`                       | Count of jobs per portal |
+| POST | `/api/jobs/trigger`                     | Manually trigger a full agent run |
 
 ### Manually trigger agent run
 ```bash
