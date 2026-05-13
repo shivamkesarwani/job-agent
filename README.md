@@ -1,6 +1,6 @@
 # Job Agent – AI-Powered Job Scraper (Spring Boot + MongoDB)
 
-An AI agent that scrapes job portals twice daily, scores each listing against your skills using an LLM, and exposes a REST API to browse the results.
+An AI agent that scrapes job portals twice daily, scores each listing against your skills using Google Gemini AI, and exposes a REST API to browse the results. Includes a built-in HTML dashboard UI.
 
 ---
 
@@ -19,13 +19,15 @@ An AI agent that scrapes job portals twice daily, scores each listing against yo
 │       │             ──► LinkedIn HTML              │
 │       │                                             │
 │       ▼                                             │
-│  AIAgentService ──► OpenAI GPT-4o-mini             │
+│  AIAgentService ──► Google Gemini 2.0 Flash Lite   │
 │  (score 0-10, extract skills, summarize)           │
 │       │                                             │
 │       ▼                                             │
 │  JobFilterService ──► MongoDB (deduplicate + save) │
 │                                                     │
 │  JobController ──► REST API                        │
+│                                                     │
+│  Dashboard UI ──► src/main/resources/static/       │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -35,8 +37,8 @@ An AI agent that scrapes job portals twice daily, scores each listing against yo
 
 - Java 17+
 - Maven 3.8+
-- MongoDB (local or Atlas)
-- OpenAI API key (or swap for any Spring AI provider)
+- MongoDB (Docker recommended)
+- Google Gemini API key (free from [Google AI Studio](https://aistudio.google.com/app/apikey))
 
 ---
 
@@ -44,7 +46,7 @@ An AI agent that scrapes job portals twice daily, scores each listing against yo
 
 ### 1. Clone and configure
 
-Edit `src/main/resources/application.yml`:
+Edit `src/main/resources/application.yml` with your skills and preferences:
 
 ```yaml
 job-agent:
@@ -60,23 +62,45 @@ job-agent:
     preferred-locations:
       - Remote
       - Delhi
+  limits:
+    max-jobs-per-run: 5           # max jobs analyzed per agent run
+    delay-between-calls-ms: 5000  # 5s delay between Gemini API calls
 ```
 
-### 2. Set your OpenAI key
+### 2. Set your Gemini API key
 
+Get your free API key from [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+
+**Mac/Linux:**
 ```bash
-export OPENAI_API_KEY=sk-...
+export GOOGLE_GEMINI_API_KEY=AIzaSy...
 ```
 
-Or add it directly in `application.yml` (not recommended for production).
+**Windows CMD:**
+```cmd
+set GOOGLE_GEMINI_API_KEY=AIzaSy...
+```
 
-### 3. Run MongoDB
+**IntelliJ IDEA:**
+1. Run → Edit Configurations
+2. Select your Spring Boot run config
+3. Modify options → Environment Variables
+4. Add: `GOOGLE_GEMINI_API_KEY=AIzaSy...`
+
+### 3. Run MongoDB via Docker
 
 ```bash
-# Local Docker
-docker run -d -p 27017:27017 --name mongo mongo:7
+# Start MongoDB container (auto-restarts with Docker)
+docker run -d \
+  --name mongodb \
+  --restart always \
+  -p 27017:27017 \
+  mongo:7
+```
 
-# Or use MongoDB Atlas (free tier) and update the URI in application.yml
+Verify it's running:
+```bash
+docker ps
 ```
 
 ### 4. Build and run
@@ -84,6 +108,55 @@ docker run -d -p 27017:27017 --name mongo mongo:7
 ```bash
 mvn clean install
 mvn spring-boot:run
+```
+
+App starts on `http://localhost:8080`
+
+---
+
+## Dashboard UI
+
+A built-in HTML dashboard is available at:
+
+```
+http://localhost:8080
+```
+
+Place `index.html` (the dashboard file) in:
+```
+src/main/resources/static/index.html
+```
+
+**Features:**
+- View all scraped jobs sorted by AI relevance score
+- Search jobs by MongoDB ID
+- Filter by source portal (Remotive, RemoteOK, Arbeitnow, LinkedIn)
+- Filter by minimum relevance score (slider)
+- Full-text search by title, company, or skill
+- View full job details with AI summary and skill tags
+- One-click Apply button
+- Manually trigger agent run from the UI
+
+---
+
+## Viewing Data in MongoDB
+
+### Option 1 — MongoDB Compass (Recommended)
+1. Open MongoDB Compass
+2. Connect using: `mongodb://localhost:27017`
+3. Open the `jobagent` database → `jobs` collection
+
+### Option 2 — MongoDB Shell inside Docker
+```bash
+# Open shell inside Docker container
+docker exec -it mongodb mongosh
+
+# Commands inside mongosh
+use jobagent
+db.jobs.find().pretty()                              # all jobs
+db.jobs.countDocuments()                             # total count
+db.jobs.find({ source: "linkedin" }).pretty()        # by portal
+db.jobs.find({ relevanceScore: { $gte: 8 } }).pretty() # high score jobs
 ```
 
 ---
@@ -101,6 +174,11 @@ mvn spring-boot:run
 | GET | `/api/jobs/stats` | Count of jobs per portal |
 | POST | `/api/jobs/trigger` | Manually trigger a full agent run |
 
+### Manually trigger agent run
+```bash
+curl -X POST http://localhost:8080/api/jobs/trigger
+```
+
 ### Example response (`GET /api/jobs`)
 
 ```json
@@ -111,18 +189,96 @@ mvn spring-boot:run
       "title": "Senior Java Backend Developer",
       "company": "Acme Corp",
       "location": "Remote",
-      "source": "remotive",
+      "source": "linkedin",
       "relevanceScore": 9.2,
       "aiSummary": "Strong match: requires Spring Boot, MongoDB, and microservices experience.",
       "skills": ["Java", "Spring Boot", "MongoDB", "Docker"],
-      "applyUrl": "https://remotive.com/job/...",
+      "applyUrl": "https://linkedin.com/jobs/...",
       "scrapedAt": "2025-01-15T08:02:11"
     }
   ],
-  "totalElements": 47,
-  "totalPages": 3
+  "totalElements": 3,
+  "totalPages": 1
 }
 ```
+
+---
+
+## AI Configuration (Google Gemini)
+
+Current setup in `application.yml`:
+
+```yaml
+spring:
+  ai:
+    google:
+      genai:
+        api-key: ${GOOGLE_GEMINI_API_KEY}
+        chat:
+          options:
+            model: gemini-2.0-flash-lite   # separate free quota pool
+            temperature: 0.2
+    retry:
+      max-attempts: 1          # no retries — saves quota
+      on-client-errors: false
+```
+
+### Why `gemini-2.0-flash-lite`?
+- Has its own separate free quota pool from `gemini-2.0-flash`
+- Faster and cheaper per token
+- More than capable for job scoring tasks
+- Free tier: up to 1,500 requests/day
+
+### Gemini Free Tier Limits & Recommended Settings
+
+| Model | RPM Limit | Safe Delay | Max Jobs/Run |
+|---|---|---|---|
+| `gemini-2.0-flash-lite` | 30 req/min | `3000ms` | 10 |
+| `gemini-2.0-flash` | 15 req/min | `5000ms` | 5 |
+
+If you hit a **429 quota error**, reduce jobs per run or increase delay in `application.yml`:
+```yaml
+job-agent:
+  limits:
+    max-jobs-per-run: 5
+    delay-between-calls-ms: 5000
+```
+
+---
+
+## Maven Dependencies
+
+Key dependency versions used:
+
+```xml
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.5</version>
+</parent>
+
+<!-- Spring AI BOM — manages all Spring AI versions -->
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-bom</artifactId>
+            <version>1.1.4</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<!-- Google Gemini integration (no version needed — BOM manages it) -->
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-google-genai</artifactId>
+</dependency>
+```
+
+> **Note:** `spring-ai-starter-model-google-genai` requires BOM version `1.1.4` or higher.
+> It is NOT available in `1.0.0`.
 
 ---
 
@@ -130,34 +286,36 @@ mvn spring-boot:run
 
 ### Add a new job portal
 
-1. Add a new method in `JobScraperService.java`
+1. Add a new scraper method in `JobScraperService.java`
 2. Call it from `scrapeAllPortals()`
-3. Add config in `application.yml`
+3. Add toggle config in `application.yml` under `job-agent.portals`
 
-### Change the AI model
+### Switch to a different AI provider
 
-In `application.yml`, change:
+**OpenAI:**
+```xml
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-starter-model-openai</artifactId>
+</dependency>
+```
 ```yaml
 spring:
   ai:
     openai:
+      api-key: ${OPENAI_API_KEY}
       chat:
         options:
-          model: gpt-4o-mini   # or gpt-4o, or use Anthropic/Gemini via Spring AI
+          model: gpt-4o-mini
 ```
 
-### Use Anthropic Claude instead of OpenAI
-
-Replace the dependency in `pom.xml`:
+**Anthropic Claude:**
 ```xml
 <dependency>
     <groupId>org.springframework.ai</groupId>
-    <artifactId>spring-ai-anthropic-spring-boot-starter</artifactId>
-    <version>1.0.0</version>
+    <artifactId>spring-ai-starter-model-anthropic</artifactId>
 </dependency>
 ```
-
-And in `application.yml`:
 ```yaml
 spring:
   ai:
@@ -168,6 +326,8 @@ spring:
           model: claude-sonnet-4-20250514
 ```
 
+> No changes needed in `AIAgentService.java` — `ChatClient` is provider-agnostic.
+
 ---
 
 ## Scheduler
@@ -176,13 +336,28 @@ The agent runs automatically:
 - **8:00 AM** every day (morning scan)
 - **8:00 PM** every day (evening scan)
 
-You can also trigger it manually via `POST /api/jobs/trigger`.
+Trigger manually via API or dashboard UI:
+```bash
+curl -X POST http://localhost:8080/api/jobs/trigger
+```
 
 ---
 
 ## MongoDB Indexes (auto-created)
 
-- `externalId` – unique, prevents duplicates
+- `externalId` – unique, prevents duplicate jobs
 - `source` – fast portal filtering
 - `relevanceScore` – fast score-based sorting
 - `scrapedAt` – fast recent job queries
+
+---
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+|---|---|---|
+| `429 quota exceeded, limit: 0` | Gemini daily free quota exhausted | Switch to `gemini-2.0-flash-lite` or wait 24h |
+| `429 rate limit` | Too many requests per minute | Increase `delay-between-calls-ms` to `5000` |
+| `ECONNREFUSED 27017` | MongoDB not running | Run `docker start mongodb` |
+| `version missing for spring-ai-starter-model-google-genai` | BOM version too low | Use `spring-ai-bom:1.1.4` or higher |
+| IntelliJ: `file outside module source root` | Maven not imported correctly | Right-click `pom.xml` → Add as Maven Project, then reload |
