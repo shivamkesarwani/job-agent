@@ -87,9 +87,9 @@ public class JobScheduler {
 
     private List<String> buildKeywords() {
         // Combine preferred roles with top skills as search terms
-        List<String> keywords = new java.util.ArrayList<>(candidateProfile.getPreferredRoles());
+        List<String> keywords = new java.util.ArrayList<>(candidateProfile.getCandidate().getPreferredRoles());
         // Add top skills as keywords too
-        candidateProfile.getSkills().stream()
+        candidateProfile.getCandidate().getSkills().stream()
                 .limit(3)
                 .forEach(keywords::add);
         return keywords;

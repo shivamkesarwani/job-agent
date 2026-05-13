@@ -41,29 +41,46 @@ public class AIAgentService {
         List<Job> processedJobs = new ArrayList<>();
         ChatClient chatClient = chatClientBuilder.build();
 
-        log.info("AI Agent processing {} jobs...", rawJobs.size());
+        // ── Limit jobs to analyze ──────────────────────────
+        int maxJobs = candidateProfile.getLimits().getMaxJobsPerRun();
+        List<Job> jobsToProcess = rawJobs.size() > maxJobs
+                ? rawJobs.subList(0, maxJobs)
+                : rawJobs;
 
-        for (Job job : rawJobs) {
+        log.info("AI Agent processing {} / {} jobs (limit: {})",
+                jobsToProcess.size(), rawJobs.size(), maxJobs);
+
+        for (int i = 0; i < jobsToProcess.size(); i++) {
+            Job job = jobsToProcess.get(i);
             try {
                 Job enriched = analyzeJob(chatClient, job);
                 if (enriched.getRelevanceScore() >= MIN_RELEVANCE_SCORE) {
                     processedJobs.add(enriched);
-                    log.debug("Job '{}' at '{}' scored {}", job.getTitle(), job.getCompany(), enriched.getRelevanceScore());
-                } else {
-                    log.debug("Job '{}' at '{}' filtered out (score: {})", job.getTitle(), job.getCompany(), enriched.getRelevanceScore());
                 }
+
+                // ── Delay between Gemini calls to avoid 429 ──
+                long delay = candidateProfile.getLimits().getDelayBetweenCallsMs();
+                if (i < jobsToProcess.size() - 1 && delay > 0) {
+                    log.debug("Waiting {}ms before next Gemini call...", delay);
+                    Thread.sleep(delay);
+                }
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Processing interrupted at job {}", i);
+                break;
             } catch (Exception e) {
-                log.error("AI analysis failed for job '{}': {}", job.getTitle(), e.getMessage());
-                // Fallback: include job with rule-based score
+                log.error("AI analysis failed for '{}': {}", job.getTitle(), e.getMessage());
+                // Fallback to rule-based score
                 job.setRelevanceScore(ruleBasedScore(job));
-                job.setAiSummary("Auto-scraped: " + job.getTitle() + " at " + job.getCompany());
+                job.setAiSummary("Auto-scored: " + job.getTitle() + " at " + job.getCompany());
                 if (job.getRelevanceScore() >= MIN_RELEVANCE_SCORE) {
                     processedJobs.add(job);
                 }
             }
         }
 
-        log.info("AI Agent: {} / {} jobs passed relevance filter", processedJobs.size(), rawJobs.size());
+        log.info("AI Agent done: {} jobs passed filter", processedJobs.size());
         return processedJobs;
     }
 
@@ -84,40 +101,30 @@ public class AIAgentService {
 
     private String buildPrompt(Job job) {
         return String.format("""
-            You are a job matching assistant. Analyze the following job and evaluate it for a candidate.
+            Score this job for the candidate. Respond ONLY in JSON.
 
-            === CANDIDATE PROFILE ===
-            Skills: %s
-            Years of Experience: %d
-            Preferred Roles: %s
-            Preferred Locations: %s
+        Candidate skills: %s (%d yrs exp)
+        Preferred roles: %s
 
-            === JOB LISTING ===
-            Title: %s
-            Company: %s
-            Location: %s
-            Job Type: %s
-            Description: %s
+        Job: %s at %s (%s)
+        Description (brief): %s
 
-            === YOUR TASK ===
-            Respond ONLY in this exact JSON format (no extra text, no markdown):
-            {
-              "relevanceScore": <number 0.0–10.0>,
-              "skills": [<list of tech skills mentioned in job>],
-              "experienceLevel": "<Junior|Mid|Senior|Lead>",
-              "summary": "<2-sentence summary of what this role is and why it matches or doesn't match the candidate>"
-            }
-            """,
-                String.join(", ", candidateProfile.getSkills()),
-                candidateProfile.getExperienceYears(),
-                String.join(", ", candidateProfile.getPreferredRoles()),
-                String.join(", ", candidateProfile.getPreferredLocations()),
-                job.getTitle(),
-                job.getCompany(),
-                job.getLocation(),
-                job.getJobType() != null ? job.getJobType() : "Not specified",
-                truncate(job.getDescription(), 1500)
+        JSON format:
+        {"relevanceScore":<0.0-10.0>,"skills":[<top 5 skills>],"experienceLevel":"<Junior|Mid|Senior>","summary":"<1 sentence>"}
+        """,
+                String.join(", ", candidateProfile.getCandidate().getSkills()),
+                candidateProfile.getCandidate().getExperienceYears(),
+                String.join(", ", candidateProfile.getCandidate().getPreferredRoles()),
+                escapeForFormat(job.getTitle()),
+                escapeForFormat(job.getCompany()),
+                escapeForFormat(job.getLocation()),
+                truncate(job.getDescription(), 300)
         );
+    }
+
+    private String escapeForFormat(String input) {
+        if (input == null) return "";
+        return input.replace("%", "%%");
     }
 
     private Job parseAIResponse(Job job, String response) {
@@ -151,13 +158,13 @@ public class AIAgentService {
         double score = 0.0;
         String text = (job.getTitle() + " " + job.getDescription()).toLowerCase();
 
-        for (String skill : candidateProfile.getSkills()) {
+        for (String skill : candidateProfile.getCandidate().getSkills()) {
             if (text.contains(skill.toLowerCase())) score += 1.0;
         }
-        for (String role : candidateProfile.getPreferredRoles()) {
+        for (String role : candidateProfile.getCandidate().getPreferredRoles()) {
             if (text.contains(role.toLowerCase())) score += 1.5;
         }
-        for (String loc : candidateProfile.getPreferredLocations()) {
+        for (String loc : candidateProfile.getCandidate().getPreferredLocations()) {
             if (text.contains(loc.toLowerCase())) score += 0.5;
         }
         return Math.min(score, 10.0);

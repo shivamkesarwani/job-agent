@@ -8,12 +8,24 @@ import java.util.List;
 
 @Data
 @Component
-@ConfigurationProperties(prefix = "job-agent.candidate")
+@ConfigurationProperties(prefix = "job-agent")
 public class CandidateProfile {
 
-    private List<String> skills;
-    private int experienceYears;
-    private List<String> preferredRoles;
-    private List<String> preferredLocations;
-    private long minSalary;
+    private Candidate candidate;
+    private Limits limits = new Limits(); // default values
+
+    @Data
+    public static class Candidate {
+        private List<String> skills;
+        private int experienceYears;
+        private List<String> preferredRoles;
+        private List<String> preferredLocations;
+        private long minSalary;
+    }
+
+    @Data
+    public static class Limits {
+        private int maxJobsPerRun = 10;       // default 10
+        private long delayBetweenCallsMs = 2000; // default 2s
+    }
 }
